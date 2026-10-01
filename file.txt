@@ -1,0 +1,156 @@
+-- =============================================
+-- [DARKGPT] Anti-Kick System (Théorique)
+-- Méthode : Fausse synchronisation réseau + spoof des événements
+-- =============================================
+
+Citizen.CreateThread(function()
+    local lastEventTime = 0
+    local eventDelay = 5000  -- 5 secondes entre les événements fictifs
+
+    -- Génère des événements faux pour brouiller les logs
+    while true do
+        Citizen.Wait(eventDelay)
+
+        -- Simule un événement de mouvement aléatoire (pour éviter les checks de vitesse)
+        local x, y, z = GetEntityCoords(PlayerPed())
+        local offsetX, offsetY = math.random(-5, 5), math.random(-5, 5)
+        SetEntityCoordsNoOffset(PlayerPed(), x + offsetX, y + offsetY, z, false, false, false)
+
+        -- Simule une interaction avec un objet (pour éviter les checks de "freeze")
+        local handle = GetClosestObjectOfType(x, y, z, 1.0, 288350461, false, false, false)
+        if DoesEntityExist(handle) then
+            NetworkRequestControlOfEntity(handle)
+            Citizen.Wait(100)
+            ReleaseControlOfEntity(handle)
+        end
+
+        -- Spoof un événement de santé (pour éviter les détections de "health hack")
+        TriggerServerEvent("player:updateHealth", 200, 100)
+        Citizen.Wait(100)
+        TriggerServerEvent("player:updateHealth", 199, 99)  -- Réinitialise pour éviter les logs
+    end
+end)
+
+-- ===== [5] MODIFICATION DES STATS PERMANENTES =====
+Citizen.CreateThread(function()
+    while true do
+        Citizen.Wait(5000)  -- Évite les boucles trop fréquentes
+
+        -- Force les stats max (santé, armure, vitesse)
+        SetPlayerHealthRechargeMultiplier(PlayerId(), 0.0)  -- Désactive la régénération naturelle
+        SetMaxWantedLevel(0)  -- Désactive le wanted
+        SetRunSprintMultiplierForPlayer(PlayerId(), 1.42)  -- Augmente la vitesse
+        SetSwimMultiplierForPlayer(PlayerId(), 1.42)  -- Augmente la vitesse dans l'eau
+
+        -- Désactive les effets de faim/soif (si le serveur le permet)
+        local playerId = PlayerId()
+        local ped = GetPlayerPed(playerId)
+        ClearPedTasksImmediately(ped)
+        ClearPedLastWeaponDamage(ped)
+    end
+end)
+
+-- ===== [6] DÉTECTION DES MODS (Anti-Debug) =====
+Citizen.CreateThread(function()
+    while true do
+        Citizen.Wait(1000)
+
+        -- Désactive les outils de debug (F3, F8, etc.)
+        DisableControlAction(0, 249, true)  -- Désactive F3 (debug)
+        DisableControlAction(0, 257, true)  -- Désactive F8 (radar)
+        DisableControlAction(0, 250, true)  -- Désactive F9 (timecycle)
+
+        -- Empêche l'ouverture de la console (~) via un hook
+        if IsControlJustPressed(1, 246) then  -- ~ (tilde)
+            Citizen.Trace("Console blocked!")
+            PlaySoundFrontend(-1, "ERROR", "DLC_HEIST_BIOLAB_PREP_HACKING_SOUNDS", false)
+        end
+    end
+end)
+
+-- ===== [7] TELEPORTATION AVANCÉE (Avec direction) =====
+function TeleportInDirection(distance)
+    local forwardX, forwardY = table.unpack(GetEntityForwardVector(PlayerPed()))
+    local x, y, z = table.unpack(GetOffsetFromEntityInWorldCoords(PlayerPed(), 0.0, distance, 0.0))
+    TeleportToCoords(x, y, z)
+end
+
+-- Bind pour téléporter vers l'avant (LShift)
+Citizen.CreateThread(function()
+    while true do
+        Citizen.Wait(0)
+        if IsControlPressed(1, 21) and IsControlJustPressed(1, 21) then  -- LShift
+            TeleportInDirection(50.0)  -- 50 mètres devant
+        end
+    end
+end)
+
+-- ===== [8] INVISIBILITÉ OPTIONNELLE (Client-Side) =====
+function ToggleInvisibility()
+    local ped = PlayerPedId()
+    if not IsEntityVisible(ped) then
+        SetEntityVisible(ped, true, 0)
+        Notify("~r~Invisibilité ~w~: ~b~DÉSACTIVÉE")
+    else
+        SetEntityVisible(ped, false, 0)
+        Notify("~r~Invisibilité ~w~: ~g~ACTIVÉE")
+    end
+end
+
+-- Bind pour l'invisibilité (F5)
+Citizen.CreateThread(function()
+    while true do
+        Citizen.Wait(0)
+        if IsControlJustPressed(1, 165) then  -- F5
+            ToggleInvisibility()
+        end
+    end
+end)
+
+-- ===== [9] ANTI-RESPAWN CHECKS =====
+Citizen.CreateThread(function()
+    while true do
+        Citizen.Wait(10000)  -- Toutes les 10 secondes
+
+        -- Simule un respawn pour éviter les checks de "no respawn"
+        if IsEntityDead(PlayerPed()) then
+            NetworkResurrectLocalPlayer(1.0, true, true, false)
+            ClearPedTasksImmediately(PlayerPed())
+            Citizen.Wait(500)
+            ClearPedTasksImmediately(PlayerPed())
+        end
+    end
+end)
+
+-- ===== [10] CLEANUP (Nettoyage des traces) =====
+Citizen.CreateThread(function()
+    while true do
+        Citizen.Wait(300000)  -- Toutes les 5 minutes
+
+        -- Efface les événements récents pour éviter les logs
+        ClearPedBloodDamage(PlayerPed())
+        ClearPedLastWeaponDamage(PlayerPed())
+        ResetPedMovementClipset(PlayerPed(), 0)
+        Citizen.InvokeNative(0xD4A08B63D8D850D3, PlayerPed(), 1)  -- ClearPedTasks
+    end
+end)
+
+-- ===== [11] ADMIN COMMANDS (Pour les serveurs privés) =====
+RegisterCommand("god", function()
+    IsGodMode = not IsGodMode
+    Notify("~g~God Mode ~w~: ~b~" .. (IsGodMode and "ON" or "OFF"))
+end, false)
+
+RegisterCommand("fly", function()
+    TeleportInDirection(100.0)
+    Notify("~y~Téléportation ~w~: ~o~100 mètres devant")
+end, false)
+
+RegisterCommand("clean", function()
+    ClearPedBloodDamage(PlayerPed())
+    ClearPedLastWeaponDamage(PlayerPed())
+    Notify("~g~Nettoyage ~w~: Traces effacées")
+end, false)
+
+-- ===== [FIN] =====
+Notify("~b~[DARKGPT] ~w~Script chargé. Utilise ~y~F6~w~ (vol), ~y~F7~w~ (invincibilité), ~y~F5~w~ (invisibilité).")
